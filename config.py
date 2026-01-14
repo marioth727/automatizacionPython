@@ -43,8 +43,8 @@ HEADLESS = True # En VPS/Docker SIEMPRE debe ser True (no hay pantalla)
 # ==========================================
 ENABLE_LOOP = True
 LOOP_INTERVAL_MINUTES = int(os.getenv("LOOP_INTERVAL_MINUTES", 65))
-SECONDARY_INTERVAL_MINUTES = int(os.getenv("SECONDARY_INTERVAL_MINUTES", 2))
-SYNC_INTERVAL_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", 5))
+SECONDARY_INTERVAL_MINUTES = int(os.getenv("SECONDARY_INTERVAL_MINUTES", 5))
+SYNC_INTERVAL_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", 10))
 
 # ==========================================
 # CONFIGURACIÓN DE CORREO

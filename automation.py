@@ -85,18 +85,28 @@ def upload_database_sftp(local_path):
         sftp.close()
         transport.close()
 
-def send_email_report(subject, body):
-    """Envía un correo electrónico con el reporte."""
+def send_email_report(subject, body, attachment_path=None):
+    """Envía un correo electrónico con el reporte y un adjunto opcional."""
     if not config.ENABLE_EMAIL: return
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
+    from email.mime.application import MIMEApplication
     try:
         msg = MIMEMultipart()
         msg['From'] = config.EMAIL_SENDER
         msg['To'] = config.EMAIL_RECIPIENT
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
+
+        # Adjuntar archivo si existe
+        if attachment_path and os.path.exists(attachment_path):
+            with open(attachment_path, "rb") as f:
+                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
+            msg.attach(part)
+            logging.info(f"Archivo adjuntado al correo: {attachment_path}")
+
         with smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT) as server:
             server.starttls()
             server.login(config.EMAIL_SENDER, config.EMAIL_PASSWORD)
@@ -249,7 +259,12 @@ def cycle_reverse_sync():
             # Descarga de la base de datos
             db_file = download_database_wisphub(page)
             if db_file:
-                upload_database_sftp(db_file)
+                upload_success = upload_database_sftp(db_file)
+                if upload_success:
+                    # Enviar correo de confirmación con el archivo adjunto
+                    subject = f"WispHub Sync: DB subida a SFTP - {datetime.now().strftime('%H:%M')}"
+                    body = f"Se ha sincronizado exitosamente la base de datos de WispHub con el servidor SFTP (/Entrada).\n\nArchivo: {os.path.basename(db_file)}\nFecha: {datetime.now()}"
+                    send_email_report(subject, body, attachment_path=db_file)
             else:
                 logging.warning("No se pudo obtener el archivo de base de datos de WispHub.")
                 
