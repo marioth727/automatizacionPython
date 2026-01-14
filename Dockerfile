@@ -1,5 +1,6 @@
-# Usamos la versión de imagen que nos pide el log para compatibilidad
-FROM mcr.microsoft.com/playwright/python:v1.50.0-jammy
+# Usamos la versión EXACTA que pide el error para evitar fallos de ejecución
+FROM mcr.microsoft.com/playwright/python:v1.57.0-jammy
+
 
 
 # Directorio de trabajo
