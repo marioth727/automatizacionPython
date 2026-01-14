@@ -1,5 +1,6 @@
-# Usamos la imagen oficial de Playwright para Python (incluye navegadores)
-FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
+# Usamos la versión de imagen que nos pide el log para compatibilidad
+FROM mcr.microsoft.com/playwright/python:v1.50.0-jammy
+
 
 # Directorio de trabajo
 WORKDIR /app
