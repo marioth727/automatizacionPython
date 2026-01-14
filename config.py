@@ -48,8 +48,8 @@ LOOP_INTERVAL_MINUTES = int(os.getenv("LOOP_INTERVAL_MINUTES", 65))
 ENABLE_EMAIL = True
 SMTP_SERVER = "smtp.gmail.com"  
 SMTP_PORT = 587                 
-EMAIL_SENDER = os.getenv("EMAIL_SENDER", "info.rapilinksas@gmail.com")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "jyha suzh miin flxo")
+EMAIL_SENDER = os.getenv("EMAIL_SENDER", "reporte.rapilink@gmail.com")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "Soporte2023a")
 EMAIL_RECIPIENT = os.getenv("EMAIL_RECIPIENT", "info.rapilinksas@gmail.com, gestiondecartera.rapilinksas@gmail.com")
 
 

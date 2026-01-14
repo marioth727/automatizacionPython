@@ -184,29 +184,46 @@ def upload_file_playwright(file_path):
 
             # 4. Confirmar Subida e Intentar Leer Respuesta
             if not config.DRY_RUN:
-                 logging.info("Ejecutando subida real...")
-                 # AJUSTAR SELECTOR SI ES NECESARIO (ej: 'button.btn-primary')
-                 # page.click("button:has-text('Subir'), button:has-text('Importar')")
+                 logging.info("Ejecutando subida real: Dando click en botón Importar/Subir...")
                  
+                 # Intentamos varios selectores comunes para el botón de enviar en WispHub
+                 try:
+                     # Buscamos el botón por texto o por clase primaria de envío
+                     page.click("button:has-text('Subir'), button:has-text('Importar'), button[type='submit'].btn-primary")
+                     logging.info("Botón clickeado. Esperando respuesta del servidor...")
+                 except Exception as click_error:
+                     logging.warning(f"No se pudo dar click en el botón con los selectores estándar: {click_error}")
+
                  # ESPERA INTELIGENTE PARA RESULTADOS
-                 logging.info("Esperando respuesta del sistema...")
+                 logging.info("Esperando respuesta del sistema (máximo 30s)...")
                  page.wait_for_load_state('networkidle')
-                 time.sleep(5) # Espera extra para renderizado del mensaje
+                 time.sleep(7) # Espera extra para que el mensaje de éxito aparezca
 
                  try:
-                     result_text = page.inner_text("body") # Captura TODO el texto por si acaso
+                     # Intentamos ser específicos buscando alertas o mensajes de éxito/error
+                     # .alert-success, .alert-danger son típicos de Django/Bootstrap que usa WispHub
+                     alerts = page.locator(".alert, .alert-success, .alert-danger, .toastr, .swal2-content, #messages")
                      
-                     # Intentamos ser más específicos si existen alertas
-                     alerts = page.locator(".alert, .toastr-message, .swal2-container")
                      if alerts.count() > 0:
-                         result_text = alerts.first.inner_text()
+                         result_text = ""
+                         for i in range(alerts.count()):
+                             result_text += alerts.nth(i).inner_text() + "\n"
+                     else:
+                         # Si no hay alertas específicas, buscamos el contenido principal
+                         # Generalmente dentro de un contenedor .content o #content
+                         content_main = page.locator(".content, #content, .container-fluid")
+                         if content_main.count() > 0:
+                             result_text = content_main.first.inner_text()
+                         else:
+                             result_text = page.inner_text("body")
                      
-                     logging.info(f"Texto capturado (Resumen): {result_text[:200]}...") # Log primeros caracteres
+                     logging.info(f"Texto capturado (Resumen): {result_text[:300]}...") 
                      save_report(result_text)
                      
                  except Exception as scrape_error:
                      logging.error(f"No se pudo extraer texto del resultado: {scrape_error}")
-                     send_email_report("WispHub: Error leyendo reporte", f"Se subió el archivo pero falló la lectura del mensaje: {scrape_error}")
+                     send_email_report("WispHub: Error leyendo reporte", f"Se intentó subir el archivo pero falló la lectura del mensaje: {scrape_error}")
+
             
             else:
                 logging.info("[DRY_RUN] Fin de la simulación. No se busca respuesta.")
