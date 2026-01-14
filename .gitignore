@@ -1,0 +1,15 @@
+# Secretos y Configuración
+config.py
+.env
+
+# Directorios de datos
+downloads/
+reportes/
+
+# Logs
+*.log
+*.png
+
+# Python
+__pycache__/
+*.pyc
