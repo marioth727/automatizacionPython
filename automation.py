@@ -183,61 +183,67 @@ def upload_file_playwright(file_path):
             page.set_input_files('input[type="file"]', file_path)
             page.click("button:has-text('Subir'), button:has-text('Importar')")
 
-            # 3. Paso 2 (Elegir Clientes)
-            user_names = []
-            try:
-                # Esperar a que la página de selección de clientes cargue
-                logging.info("Esperando detección de Paso 2 (Elegir Clientes)...")
-                btn_registrar = "button:has-text('Registrar Pago y Activar Servicio')"
-                selector_paso2 = "text='Por favor, indique a que clientes'"
-                
-                # Verificamos si estamos en la página correcta
-                page.wait_for_selector(f"{selector_paso2}, {btn_registrar}", timeout=25000)
-                
-                if page.locator(btn_registrar).count() > 0:
-                    logging.info("Paso 2 detectado. Raspando nombres de clientes...")
+                # 3. Paso 2 (Elegir Clientes)
+                user_names = []
+                try:
+                    logging.info("Esperando detección de Paso 2 (Elegir Clientes)...")
+                    # Mayor tolerancia y selectores separados para mejor diagnóstico
+                    btn_confirmar_text = "Registrar Pago y Activar Servicio"
                     
-                    # Raspado de nombres para el reporte
-                    rows = page.locator("table tbody tr")
-                    count = rows.count()
-                    logging.info(f"Se encontraron {count} filas en la tabla de pagos.")
-                    
-                    for i in range(count):
-                        try:
-                            td_name = rows.nth(i).locator("td").nth(1).inner_text().strip()
-                            if td_name and len(td_name) > 2: 
-                                user_names.append(td_name)
-                        except Exception as e:
-                            logging.warning(f"Error raspando nombre en fila {i}: {e}")
-                            continue
-                    
-                    logging.info(f"Clientes detectados: {user_names}")
-                    
-                    # Marcar todos los clientes
-                    check_all = "input[type='checkbox'].check-all, #check_all, table thead input[type='checkbox']"
-                    if page.locator(check_all).count() > 0:
-                        logging.info("Marcando checkbox 'Seleccionar Todos'.")
-                        page.locator(check_all).first.click()
-                    else:
-                        logging.warning("No se encontró checkbox general, intentando marcar individuales...")
-                        checkboxes = page.locator("table tbody input[type='checkbox']")
-                        for i in range(checkboxes.count()):
-                            checkboxes.nth(i).check()
+                    # Esperamos que cargue la tabla o el texto indicativo
+                    try:
+                        page.wait_for_selector("text='Por favor, indique a que clientes'", timeout=30000)
+                        logging.info("Texto de Paso 2 detectado.")
+                    except:
+                        logging.warning("No se detectó el texto esperado del Paso 2, procediendo a buscar el botón.")
 
-                    # Clic final en Registrar Pago
-                    logging.info("Haciendo clic en 'Registrar Pago y Activar Servicio'...")
-                    page.click(btn_registrar)
+                    # Buscar el botón por texto exacto o parcial
+                    btn_registrar = page.get_by_role("button", name=btn_confirmar_text)
                     
-                    # Esperar procesamiento
-                    page.wait_for_load_state('networkidle')
-                    time.sleep(10)
-                    logging.info("Procesamiento de activación completado.")
-                else:
-                    logging.warning("No se detectó el botón de Registrar Pago. Es posible que el archivo no contenga clientes válidos o ya procesados.")
-                    page.screenshot(path="debug_paso2_not_found.png")
-            except Exception as e:
-                logging.error(f"Error durante el Paso 2 de WispHub: {e}")
-                page.screenshot(path="error_paso2_critico.png")
+                    if btn_registrar.count() > 0:
+                        logging.info("Botón de activación detectado.")
+                        
+                        # Raspado de nombres para el reporte
+                        rows = page.locator("table tbody tr")
+                        count = rows.count()
+                        logging.info(f"Se encontraron {count} filas en la tabla de pagos.")
+                        
+                        for i in range(count):
+                            try:
+                                td_name = rows.nth(i).locator("td").nth(1).inner_text().strip()
+                                if td_name and len(td_name) > 2: 
+                                    user_names.append(td_name)
+                            except Exception as e:
+                                logging.warning(f"Error raspando nombre en fila {i}: {e}")
+                                continue
+                        
+                        logging.info(f"Clientes detectados: {user_names}")
+                        
+                        # Marcar todos los clientes
+                        check_all = "input[type='checkbox'].check-all, #check_all, table thead input[type='checkbox']"
+                        if page.locator(check_all).count() > 0:
+                            logging.info("Marcando checkbox 'Seleccionar Todos'.")
+                            page.locator(check_all).first.click()
+                        else:
+                            logging.warning("No se encontró checkbox general, intentando marcar individuales...")
+                            checkboxes = page.locator("table tbody input[type='checkbox']")
+                            for j in range(checkboxes.count()):
+                                checkboxes.nth(j).check()
+
+                        # Clic final
+                        logging.info(f"Haciendo clic en '{btn_confirmar_text}'...")
+                        btn_registrar.first.click()
+                        
+                        # Esperar procesamiento
+                        page.wait_for_load_state('networkidle')
+                        time.sleep(10)
+                        logging.info("Procesamiento de activación completado.")
+                    else:
+                        logging.warning(f"No se encontró el botón '{btn_confirmar_text}'.")
+                        page.screenshot(path="debug_paso2_not_found.png")
+                except Exception as e:
+                    logging.error(f"Error durante el Paso 2 de WispHub: {e}")
+                    page.screenshot(path="error_paso2_critico.png")
 
 
             # 4. Reporte
