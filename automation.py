@@ -14,7 +14,7 @@ root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 
 # Handler para archivo
-file_handler = logging.FileHandler(config.LOG_FILE)
+file_handler = logging.FileHandler("automation.log")
 file_handler.setFormatter(log_formatter)
 root_logger.addHandler(file_handler)
 
@@ -25,17 +25,12 @@ root_logger.addHandler(console_handler)
 
 logging.getLogger("paramiko").setLevel(logging.WARNING)
 
-
 def setup_directories():
     """Crea los directorios necesarios si no existen."""
-    if not os.path.exists(config.DOWNLOAD_DIR):
-        os.makedirs(config.DOWNLOAD_DIR)
-    
-    # Crear carpeta de reportes
-    reports_dir = os.path.join(os.getcwd(), "reportes")
-    if not os.path.exists(reports_dir):
-        os.makedirs(reports_dir)
-    return reports_dir
+    for directory in ["downloads", "reportes"]:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            logging.info(f"Directorio creado: {directory}")
 
 def connect_sftp():
     """Conecta al servidor SFTP y retorna el cliente."""
@@ -43,56 +38,38 @@ def connect_sftp():
         transport = paramiko.Transport((config.FTP_HOST, config.FTP_PORT))
         transport.connect(username=config.FTP_USER, password=config.FTP_PASS)
         sftp = paramiko.SFTPClient.from_transport(transport)
-        logging.info(f"Conectado exitosamente al SFTP: {config.FTP_HOST}")
+        logging.info(f"Conectado a SFTP: {config.FTP_HOST}")
         return sftp, transport
     except Exception as e:
-        logging.warning(f"No se pudo conectar al SFTP ({e}). Continuaremos para prueba de navegador.")
+        logging.error(f"Error conectando a SFTP: {e}")
         return None, None
 
 def download_latest_file(sftp):
     """Descarga el archivo más reciente del directorio SFTP."""
-    if not sftp:
-        return None
-
     try:
         sftp.chdir(config.FTP_DIR)
-        files = sftp.listdir_attr()
+        files = sftp.list_dir_attr()
         
-        # Filtramos para que sean solo archivos (no directorios)
-        import stat
-        files = [f for f in files if stat.S_ISREG(f.st_mode)]
-        
+        # Filtrar solo archivos y ordenar por fecha de modificación
+        files = [f for f in files if not f.filename.startswith(".")]
         if not files:
-            logging.warning("No se encontraron archivos en el directorio SFTP.")
+            logging.info("No se encontraron archivos en el servidor SFTP.")
             return None
         
-        files.sort(key=lambda f: f.st_mtime)
+        latest_file = max(files, key=lambda f: f.st_mtime)
+        remote_path = latest_file.filename
+        local_path = os.path.join("downloads", latest_file.filename)
         
-        latest_file_attr = files[-1]
-        latest_filename = latest_file_attr.filename
-        
-        # Opcional: Verificar si el archivo es reciente (eg. de hoy)
-        # file_date = datetime.fromtimestamp(latest_file_attr.st_mtime)
-        # logging.info(f"Archivo encontrado: {latest_filename} ({file_date})")
-
-        logging.info(f"Archivo más reciente encontrado: {latest_filename}")
-        
-        local_path = os.path.join(config.DOWNLOAD_DIR, latest_filename)
-        
-        sftp.get(latest_filename, local_path)
-        
+        logging.info(f"Descargando archivo más reciente: {remote_path}")
+        sftp.get(remote_path, local_path)
         logging.info(f"Archivo descargado: {local_path}")
         return local_path
     except Exception as e:
         logging.error(f"Error descargando archivo: {e}")
         return None
 
-
 def send_email_report(subject, body):
     """Envía un correo electrónico con el reporte."""
-    if not config.ENABLE_EMAIL:
-        return
-
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -105,28 +82,24 @@ def send_email_report(subject, body):
 
         msg.attach(MIMEText(body, 'plain'))
 
-        server = smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT)
-        server.starttls()
-        server.login(config.EMAIL_SENDER, config.EMAIL_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(config.EMAIL_SENDER, config.EMAIL_RECIPIENT.split(','), text)
-        server.quit()
-        logging.info(f"Correo enviado a {config.EMAIL_RECIPIENT}")
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(config.EMAIL_SENDER, config.EMAIL_PASSWORD)
+            server.send_message(msg)
+            
+        logging.info("Correo enviado exitosamente.")
     except Exception as e:
-        logging.error(f"Error enviando correo: {e}")
+        logging.error(f"Fallo al enviar correo: {e}")
 
 def save_report(text_content):
     """Guarda el resultado de la importación en un archivo de texto y lo envía por correo."""
-    reports_dir = os.path.join(os.getcwd(), "reportes")
-    filename = f"reporte_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    filepath = os.path.join(reports_dir, filename)
-    
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"REPORTE DE IMPORTACIÓN - {datetime.now()}\n")
-        f.write("=========================================\n\n")
-        f.write(text_content)
-    
-    logging.info(f"Reporte guardado en: {filepath}")
+    filename = f"reportes/reporte_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(text_content)
+        logging.info(f"Reporte guardado localmente: {filename}")
+    except Exception as e:
+        logging.error(f"Error guardando reporte: {e}")
     
     # Enviar por correo
     subject = f"Reporte de subida de pago Efecty - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -144,7 +117,7 @@ def save_report(text_content):
 
 def upload_file_playwright(file_path):
     """
-    Usa Playwright para loguearse en WispHub y subir el archivo.
+    Usa Playwright para loguearse en WispHub, subir el archivo y manejar el proceso multi-paso.
     """
     if config.DRY_RUN:
         logging.info(f"[DRY_RUN] Iniciando simulación de subida para: {file_path}")
@@ -173,7 +146,6 @@ def upload_file_playwright(file_path):
                 actual_url = page.url
                 logging.warning(f"No se detectó /panel/ en URL. URL actual: {actual_url}")
                 page.screenshot(path="debug_login_result.png")
-                logging.info("Captura de pantalla de login guardada como debug_login_result.png")
                 page.wait_for_load_state('domcontentloaded')
 
             # 2. Ir a Importación
@@ -196,54 +168,118 @@ def upload_file_playwright(file_path):
             if not config.DRY_RUN:
                  logging.info("Ejecutando subida real: Dando click en botón Importar/Subir...")
                  
-                 # Intentamos varios selectores comunes para el botón de enviar en WispHub
                  try:
-                     # Buscamos el botón por texto o por clase primaria de envío
+                     # Clic en el botón inicial de Importar/Subir
                      page.click("button:has-text('Subir'), button:has-text('Importar'), button[type='submit'].btn-primary")
-                     logging.info("Botón clickeado. Esperando respuesta del servidor...")
+                     logging.info("Botón clickeado. Esperando página de selección...")
                  except Exception as click_error:
-                     logging.warning(f"No se pudo dar click en el botón con los selectores estándar: {click_error}")
+                     logging.warning(f"No se pudo dar click inicial: {click_error}")
 
-                 # ESPERA INTELIGENTE PARA RESULTADOS
-                 logging.info("Esperando respuesta del sistema (máximo 30s)...")
-                 page.wait_for_load_state('networkidle')
-                 time.sleep(7) # Espera extra para que el mensaje de éxito aparezca
-
+                 user_names = []
+                 # MANEJO DEL PASO 2 (Elegir Clientes)
                  try:
-                     # Intentamos ser específicos buscando alertas o mensajes de éxito/error
-                     # .alert-success, .alert-danger son típicos de Django/Bootstrap que usa WispHub
-                     alerts = page.locator(".alert, .alert-success, .alert-danger, .toastr, .swal2-content, #messages")
+                     logging.info("Esperando carga del Paso 2 (Selección de Clientes)...")
                      
-                     if alerts.count() > 0:
-                         result_text = ""
-                         for i in range(alerts.count()):
-                             result_text += alerts.nth(i).inner_text() + "\n"
-                     else:
-                         # Si no hay alertas específicas, buscamos el contenido principal
-                         # Generalmente dentro de un contenedor .content o #content
-                         content_main = page.locator(".content, #content, .container-fluid")
-                         if content_main.count() > 0:
-                             result_text = content_main.first.inner_text()
-                         else:
-                             result_text = page.inner_text("body")
-                     
-                     logging.info(f"Texto capturado (Resumen): {result_text[:300]}...") 
-                     save_report(result_text)
-                     
-                 except Exception as scrape_error:
-                     logging.error(f"No se pudo extraer texto del resultado: {scrape_error}")
-                     send_email_report("WispHub: Error leyendo reporte", f"Se intentó subir el archivo pero falló la lectura del mensaje: {scrape_error}")
+                     # Selectores para detectar que estamos en la página de selección
+                     txt_instruccion = "text='Por favor, indique a que clientes se actualizaran los datos'"
+                     btn_final = "button:has-text('Registrar Pago y Activar Servicio')"
+                     check_all = "input[type='checkbox'].check-all, #check_all, table thead input[type='checkbox']"
 
+                     # Esperamos a que aparezca la instrucción o el botón azul
+                     try:
+                         page.wait_for_selector(f"{txt_instruccion}, {btn_final}", timeout=25000)
+                         logging.info("Página de selección detectada!")
+                     except:
+                         logging.info("No se detectaron elementos clave rápido, revisando conteo manual...")
+
+                     # Si vemos el botón azul o el título, procedemos
+                     if page.locator(btn_final).count() > 0 or page.locator("h3:has-text('Elegir Clientes')").count() > 0:
+                         logging.info("Confirmado: Paso 2 Activo. Raspando nombres...")
+                         
+                         rows = page.locator("table tbody tr")
+                         count = rows.count()
+                         for i in range(count):
+                             try:
+                                 # El nombre suele estar en la 2da columna
+                                 row_tds = rows.nth(i).locator("td")
+                                 if row_tds.count() >= 2:
+                                     name = row_tds.nth(1).inner_text().strip()
+                                     # Si es muy corto, probamos la 3ra columna
+                                     if len(name) < 3 and row_tds.count() >= 3:
+                                         name = row_tds.nth(2).inner_text().strip()
+                                     
+                                     if name and len(name) > 2:
+                                         user_names.append(name.replace('\n', ' '))
+                             except:
+                                 continue
+                         
+                         logging.info(f"Usuarios encontrados: {user_names}")
+                         
+                         # Seleccionar todos
+                         if page.locator(check_all).count() > 0:
+                             logging.info("Marcando checkbox global...")
+                             page.locator(check_all).first.click()
+                         else:
+                             logging.info("Marcando checkboxes individuales...")
+                             checks = page.locator("table tbody input[type='checkbox']")
+                             for i in range(checks.count()):
+                                 checks.nth(i).check()
+
+                         # Click FINAL
+                         logging.info("Haciendo clic en 'Registrar Pago y Activar Servicio'...")
+                         page.click(btn_final)
+                         
+                         # Esperar a que la página procese
+                         logging.info("Esperando confirmación final tras activación...")
+                         page.wait_for_load_state('networkidle')
+                         time.sleep(10) # 10 segundos para estar seguros
+                     else:
+                         logging.info("No se detectó pantalla de selección. Procesamiento directo.")
+
+                 except Exception as step2_err:
+                     logging.warning(f"Error en el Paso 2: {step2_err}")
+                     page.screenshot(path="debug_step2_error.png")
+
+                 # REPORTE FINAL CONSOLIDADO
+                 logging.info("Generando reporte para el correo...")
+                 try:
+                     # Prioridad a las alertas de Bootstrap que usa WispHub
+                     alerts = page.locator(".alert, .alert-success, .alert-danger, #messages")
+                     
+                     final_msg = ""
+                     if alerts.count() > 0:
+                         for i in range(alerts.count()):
+                             msg = alerts.nth(i).inner_text().strip()
+                             if msg:
+                                 final_msg += f"{msg}\n"
+                     
+                     if len(final_msg) < 5:
+                         container = page.locator(".content, #content, .container-fluid, #container")
+                         final_msg = container.first.inner_text() if container.count() > 0 else page.inner_text("body")
+
+                     # Armar reporte
+                     report_body = ""
+                     if user_names:
+                         report_body += "RESUMEN DE PROCESAMIENTO:\n"
+                         for name in user_names:
+                             report_body += f"✅ {name}\n"
+                         report_body += "\n"
+                     
+                     report_body += "DETALLES DE WISPHUB:\n" + ("-"*30) + "\n" + final_msg
+                     
+                     logging.info("Reporte consolidado listo.") 
+                     save_report(report_body)
+                     
+                 except Exception as scrape_err:
+                     logging.error(f"Error leyendo resultado final: {scrape_err}")
+                     send_email_report("WispHub: Error de Lectura", f"El proceso terminó pero no pude leer el mensaje final: {scrape_err}")
             
             else:
-                logging.info("[DRY_RUN] Fin de la simulación. No se busca respuesta.")
-                # En DRY_RUN no mandamos correo para no hacer spam, o podríamos descomentarlo:
-                # save_report("Prueba de reporte en modo DRY RUN.")
+                logging.info("[DRY_RUN] Fin de la simulación.")
 
         except Exception as e:
             logging.error(f"Error en Playwright: {e}")
             page.screenshot(path="error_screenshot.png")
-            print(f"Ocurrió un error. Ver 'error_screenshot.png'")
             send_email_report("WispHub: Error Crítico", f"Ocurrió un error ejecutando el script:\n\n{str(e)}")
         finally:
             browser.close()
