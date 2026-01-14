@@ -16,10 +16,13 @@ COPY . .
 # Variables de entorno por defecto (Docker)
 ENV PYTHONUNBUFFERED=1
 ENV TZ=America/Bogota
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar tzdata para manejar zonas horarias
-RUN apt-get update && apt-get install -y tzdata && \
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
+# Instalar tzdata de forma no interactiva
+RUN apt-get update && \
+    apt-get install -y tzdata && \
+    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Comando de inicio
