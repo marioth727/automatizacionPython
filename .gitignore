@@ -1,6 +1,6 @@
-# Secretos y Configuración
-config.py
+# Secretos (Ahora usaremos variables de entorno en Dokploy)
 .env
+
 
 # Directorios de datos
 downloads/
