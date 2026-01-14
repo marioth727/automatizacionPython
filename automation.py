@@ -167,9 +167,13 @@ def upload_file_playwright(file_path):
             
             logging.info("Credenciales enviadas. Esperando Dashboard...")
             try:
-                page.wait_for_url("**/panel/**", timeout=20000)
+                page.wait_for_url("**/panel/**", timeout=25000)
+                logging.info(f"Dashboard detectado: {page.url}")
             except:
-                logging.info("No se detectó /panel/ en URL, esperando carga genérica...")
+                actual_url = page.url
+                logging.warning(f"No se detectó /panel/ en URL. URL actual: {actual_url}")
+                page.screenshot(path="debug_login_result.png")
+                logging.info("Captura de pantalla de login guardada como debug_login_result.png")
                 page.wait_for_load_state('domcontentloaded')
 
             # 2. Ir a Importación
@@ -178,7 +182,13 @@ def upload_file_playwright(file_path):
             
             # 3. Subir Archivo
             logging.info(f"Adjuntando archivo: {file_path}")
-            page.wait_for_selector('input[type="file"]', state='attached', timeout=10000)
+            try:
+                page.wait_for_selector('input[type="file"]', state='attached', timeout=20000)
+            except Exception as e:
+                logging.error(f"No se encontró el input de archivo. URL actual: {page.url}")
+                page.screenshot(path="error_input_not_found.png")
+                raise e
+            
             page.set_input_files('input[type="file"]', file_path)
             logging.info("Archivo puesto en el input.")
 
