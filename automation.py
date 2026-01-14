@@ -270,7 +270,7 @@ def cycle_reverse_sync():
                 
         except Exception as e:
             logging.error(f"Error crítico en ciclo de sincronización: {e}")
-            send_email_report("WispHub: Fallo Sync 5min", f"El ciclo de sincronización de base de datos falló:\n\n{str(e)}")
+            send_email_report("WispHub: Fallo Sync 10min", f"El ciclo de sincronización de base de datos falló:\n\n{str(e)}")
         finally:
             browser.close()
 
@@ -293,30 +293,36 @@ def main():
     while True:
         now = time.time()
 
-        # 1. Sincronización Inversa (Cada 5 min)
+        # 1. Sincronización Inversa (Cada 10 min)
         if now - last_sync >= (config.SYNC_INTERVAL_MINUTES * 60):
             try:
                 cycle_reverse_sync()
+                time.sleep(config.TASK_DELAY_SECONDS) # Delay extendido para evitar Cloudflare
             except Exception as e:
                 logging.error(f"Fallo en Carrera de Sync: {e}")
             last_sync = time.time()
+            now = time.time() # Refrescar tiempo tras la espera
 
         # 2. Ciclo de Pagos (Primario - Cada 65 min)
         if now - last_payment_primary >= (config.LOOP_INTERVAL_MINUTES * 60):
             try:
                 cycle_payments("Carrera 1 de 2")
+                time.sleep(config.TASK_DELAY_SECONDS) 
             except Exception as e:
                 logging.error(f"Fallo en Carrera 1 de Pagos: {e}")
             last_payment_primary = time.time()
             secondary_due = True
+            now = time.time()
 
-        # 3. Ciclo de Pagos (Secundario - 2 min después del Primario)
+        # 3. Ciclo de Pagos (Secundario - 5 min después del Primario)
         if secondary_due and (now - last_payment_primary >= (config.SECONDARY_INTERVAL_MINUTES * 60)):
             try:
                 cycle_payments("Carrera 2 de 2")
+                time.sleep(config.TASK_DELAY_SECONDS)
             except Exception as e:
                 logging.error(f"Fallo en Carrera 2 de Pagos: {e}")
             secondary_due = False
+            now = time.time()
 
         time.sleep(10) # Revisión cada 10 segundos
 
