@@ -123,7 +123,7 @@ def save_report(text_content):
             f.write(text_content)
     except: pass
     
-    subject = f"Reporte Automatización - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    subject = f"Reporte de subida de pago Efecty - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     intro = "Detalle del robot:\n------------------------------------------------------------\n"
     send_email_report(subject, intro + text_content)
 
@@ -186,22 +186,59 @@ def upload_file_playwright(file_path):
             # 3. Paso 2 (Elegir Clientes)
             user_names = []
             try:
-                page.wait_for_selector("text='Por favor, indique a que clientes', button:has-text('Registrar Pago')", timeout=20000)
-                if page.locator("button:has-text('Registrar Pago')").count() > 0:
-                    logging.info("Paso 2 detected. Activating users...")
+                # Esperar a que la página de selección de clientes cargue
+                logging.info("Esperando detección de Paso 2 (Elegir Clientes)...")
+                btn_registrar = "button:has-text('Registrar Pago y Activar Servicio')"
+                selector_paso2 = "text='Por favor, indique a que clientes'"
+                
+                # Verificamos si estamos en la página correcta
+                page.wait_for_selector(f"{selector_paso2}, {btn_registrar}", timeout=25000)
+                
+                if page.locator(btn_registrar).count() > 0:
+                    logging.info("Paso 2 detectado. Raspando nombres de clientes...")
+                    
+                    # Raspado de nombres para el reporte
                     rows = page.locator("table tbody tr")
-                    for i in range(rows.count()):
+                    count = rows.count()
+                    logging.info(f"Se encontraron {count} filas en la tabla de pagos.")
+                    
+                    for i in range(count):
                         try:
                             td_name = rows.nth(i).locator("td").nth(1).inner_text().strip()
-                            if td_name and len(td_name) > 2: user_names.append(td_name)
-                        except: continue
+                            if td_name and len(td_name) > 2: 
+                                user_names.append(td_name)
+                        except Exception as e:
+                            logging.warning(f"Error raspando nombre en fila {i}: {e}")
+                            continue
                     
+                    logging.info(f"Clientes detectados: {user_names}")
+                    
+                    # Marcar todos los clientes
                     check_all = "input[type='checkbox'].check-all, #check_all, table thead input[type='checkbox']"
-                    if page.locator(check_all).count() > 0: page.locator(check_all).first.click()
-                    page.click("button:has-text('Registrar Pago')")
+                    if page.locator(check_all).count() > 0:
+                        logging.info("Marcando checkbox 'Seleccionar Todos'.")
+                        page.locator(check_all).first.click()
+                    else:
+                        logging.warning("No se encontró checkbox general, intentando marcar individuales...")
+                        checkboxes = page.locator("table tbody input[type='checkbox']")
+                        for i in range(checkboxes.count()):
+                            checkboxes.nth(i).check()
+
+                    # Clic final en Registrar Pago
+                    logging.info("Haciendo clic en 'Registrar Pago y Activar Servicio'...")
+                    page.click(btn_registrar)
+                    
+                    # Esperar procesamiento
                     page.wait_for_load_state('networkidle')
                     time.sleep(10)
-            except: pass
+                    logging.info("Procesamiento de activación completado.")
+                else:
+                    logging.warning("No se detectó el botón de Registrar Pago. Es posible que el archivo no contenga clientes válidos o ya procesados.")
+                    page.screenshot(path="debug_paso2_not_found.png")
+            except Exception as e:
+                logging.error(f"Error durante el Paso 2 de WispHub: {e}")
+                page.screenshot(path="error_paso2_critico.png")
+
 
             # 4. Reporte
             alerts = page.locator(".alert, .alert-success, .alert-danger, #messages")
