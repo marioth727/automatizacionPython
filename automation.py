@@ -158,9 +158,9 @@ def upload_file_playwright(file_path):
         browser = p.chromium.launch(headless=config.HEADLESS)
         page = browser.new_page()
         try:
-            # 1. Login con selectores robustos y tiempo extendido
+            # 1. Login con selectores robustos y tiempo extendido (90s para Cloudflare)
             logging.info("Navegando al Login...")
-            page.goto(config.WISPHUB_LOGIN_URL)
+            page.goto(config.WISPHUB_LOGIN_URL, timeout=90000)
             
             page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
             page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
@@ -239,7 +239,19 @@ def upload_file_playwright(file_path):
                     time.sleep(10)
                     logging.info("Procesamiento de activación completado.")
                 else:
-                    logging.warning(f"No se encontró el botón '{btn_confirmar_text}'.")
+                    # Si no hay botón, verifiquemos si hay un mensaje de WispHub (ej: ya procesado)
+                    msg_wisphub = ""
+                    try:
+                        alert_elements = page.locator(".alert, .alert-warning, .alert-info, .help-block")
+                        if alert_elements.count() > 0:
+                            msg_wisphub = alert_elements.first.inner_text().strip()
+                    except: pass
+                    
+                    if msg_wisphub:
+                        logging.warning(f"No se encontró el botón. WispHub dice: '{msg_wisphub}'")
+                    else:
+                        logging.warning(f"No se encontró el botón '{btn_confirmar_text}' ni mensajes de alerta.")
+                    
                     page.screenshot(path="debug_paso2_not_found.png")
             except Exception as e:
                 logging.error(f"Error durante el Paso 2 de WispHub: {e}")
@@ -286,8 +298,8 @@ def cycle_reverse_sync():
         context = browser.new_context()
         page = context.new_page()
         try:
-            # Login con selectores robustos y tiempo extendido
-            page.goto(config.WISPHUB_LOGIN_URL)
+            # Login con selectores robustos y tiempo extendido (90s)
+            page.goto(config.WISPHUB_LOGIN_URL, timeout=90000)
             page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
             page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
             page.click('button[type="submit"], input[type="submit"]')
