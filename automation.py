@@ -48,7 +48,7 @@ def download_latest_file(sftp):
     """Descarga el archivo más reciente del directorio SFTP."""
     try:
         sftp.chdir(config.FTP_DIR)
-        files = sftp.list_dir_attr()
+        files = sftp.listdir_attr()
         
         # Filtrar solo archivos y ordenar por fecha de modificación
         files = [f for f in files if not f.filename.startswith(".")]
