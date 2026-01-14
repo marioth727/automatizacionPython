@@ -121,8 +121,18 @@ def download_database_wisphub(page):
     """Descarga el reporte TXT de facturas de WispHub."""
     logging.info(f"Accediendo a descarga de base de datos: {config.WISPHUB_DOWNLOAD_URL}")
     try:
+        # Iniciamos la escucha de la descarga
         with page.expect_download(timeout=60000) as download_info:
-            page.goto(config.WISPHUB_DOWNLOAD_URL)
+            try:
+                # goto lanzará error si el link es una descarga directa ("Download is starting")
+                # Lo capturamos y simplemente permitimos que el with continue
+                page.goto(config.WISPHUB_DOWNLOAD_URL)
+            except Exception as e:
+                if "Download is starting" in str(e):
+                    logging.info("La descarga inició correctamente (Mensaje de navegación omitido).")
+                else:
+                    raise e
+                    
         download = download_info.value
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         local_path = os.path.join("downloads", f"BASE_WISPHUB_{timestamp}.txt")
@@ -138,12 +148,25 @@ def upload_file_playwright(file_path):
         browser = p.chromium.launch(headless=config.HEADLESS)
         page = browser.new_page()
         try:
-            # 1. Login con selectores robustos
+            # 1. Login con selectores robustos y tiempo extendido
+            logging.info("Navegando al Login...")
             page.goto(config.WISPHUB_LOGIN_URL)
+            
             page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
             page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
             page.click('button[type="submit"], input[type="submit"]')
-            page.wait_for_url("**/panel/**", timeout=25000)
+            
+            # WispHub a veces tiene Cloudflare o es lento redirigiendo
+            logging.info("Esperando acceso al Dashboard...")
+            try:
+                page.wait_for_url("**/panel/**", timeout=45000)
+            except Exception as url_err:
+                # Si falla por URL, verificamos si hay elementos del panel presentes
+                if page.locator(".sidebar, .navbar, a[href*='logout']").count() > 0:
+                    logging.info("Dashboard detectado por elementos visuales (URL no cambió a tiempo).")
+                else:
+                    page.screenshot(path="fallo_login_vps.png")
+                    raise url_err
 
             # 2. Upload
             page.goto(config.WISPHUB_IMPORT_URL)
@@ -210,12 +233,18 @@ def cycle_reverse_sync():
         context = browser.new_context()
         page = context.new_page()
         try:
-            # Login con selectores robustos
+            # Login con selectores robustos y tiempo extendido
             page.goto(config.WISPHUB_LOGIN_URL)
             page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
             page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
             page.click('button[type="submit"], input[type="submit"]')
-            page.wait_for_url("**/panel/**", timeout=25000)
+            
+            try:
+                page.wait_for_url("**/panel/**", timeout=45000)
+            except:
+                if page.locator(".sidebar, a[href*='logout']").count() == 0:
+                    page.screenshot(path="fallo_sync_login.png")
+                    raise Exception("Timeout esperando Dashboard en ciclo Sync")
 
             # Descarga de la base de datos
             db_file = download_database_wisphub(page)
