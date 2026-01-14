@@ -272,16 +272,32 @@ def run_automation_cycle():
 
 def main():
     if config.ENABLE_LOOP:
-        print(f"Modo Bucle ACTIVADO. Intervalo: {config.LOOP_INTERVAL_MINUTES} minutos.")
+        print(f"Modo Bucle ACTIVADO.")
+        print(f"Configuración: Ejecutar -> Esperar {config.SECONDARY_INTERVAL_MINUTES} min -> Ejecutar -> Esperar {config.LOOP_INTERVAL_MINUTES} min.")
+        
         while True:
+            # --- CARRERA 1 ---
+            logging.info(">>> INICIANDO CARRERA 1 de 2")
             run_automation_cycle()
             
-            wait_seconds = config.LOOP_INTERVAL_MINUTES * 60
-            print(f"Esperando {config.LOOP_INTERVAL_MINUTES} minutos para la próxima ejecución...")
+            # --- ESPERA INTERMEDIA ---
+            wait_sec_1 = config.SECONDARY_INTERVAL_MINUTES * 60
+            logging.info(f"Carrera 1 terminada. Esperando {config.SECONDARY_INTERVAL_MINUTES} min para Carrera 2...")
             try:
-                time.sleep(wait_seconds)
+                time.sleep(wait_sec_1)
             except KeyboardInterrupt:
-                print("Ejecución detenida por el usuario.")
+                break
+                
+            # --- CARRERA 2 ---
+            logging.info(">>> INICIANDO CARRERA 2 de 2")
+            run_automation_cycle()
+            
+            # --- ESPERA LARGA ---
+            wait_sec_2 = config.LOOP_INTERVAL_MINUTES * 60
+            logging.info(f"Carrera 2 terminada. Esperando {config.LOOP_INTERVAL_MINUTES} min para el próximo ciclo...")
+            try:
+                time.sleep(wait_sec_2)
+            except KeyboardInterrupt:
                 break
     else:
         run_automation_cycle()

@@ -15,13 +15,10 @@ COPY . .
 
 # Variables de entorno por defecto (Docker)
 ENV PYTHONUNBUFFERED=1
-# Configuración de zona horaria (No interactiva)
-ENV TZ=America/Bogota
-ENV DEBIAN_FRONTEND=noninteractive
+# Configuración de zona horaria (Bulletproof)
+RUN ln -snf /usr/share/zoneinfo/America/Bogota /etc/localtime && echo America/Bogota > /etc/timezone
 RUN apt-get update && \
-    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
-    apt-get install -y tzdata && \
-    dpkg-reconfigure --frontend noninteractive tzdata && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Comando de inicio
