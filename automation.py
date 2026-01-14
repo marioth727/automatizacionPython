@@ -8,13 +8,23 @@ import config
 # Playwright Imports
 from playwright.sync_api import sync_playwright
 
-# Configuración de Logging
-logging.basicConfig(
-    filename=config.LOG_FILE,
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Configuración de Logging Dual (Consola + Archivo)
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# Handler para archivo
+file_handler = logging.FileHandler(config.LOG_FILE)
+file_handler.setFormatter(log_formatter)
+root_logger.addHandler(file_handler)
+
+# Handler para consola (Para ver en Dokploy)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+root_logger.addHandler(console_handler)
+
 logging.getLogger("paramiko").setLevel(logging.WARNING)
+
 
 def setup_directories():
     """Crea los directorios necesarios si no existen."""
