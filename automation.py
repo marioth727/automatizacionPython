@@ -138,12 +138,12 @@ def upload_file_playwright(file_path):
         browser = p.chromium.launch(headless=config.HEADLESS)
         page = browser.new_page()
         try:
-            # 1. Login
+            # 1. Login con selectores robustos
             page.goto(config.WISPHUB_LOGIN_URL)
-            page.fill('input[name="username"]', config.WISPHUB_USER)
-            page.fill('input[name="password"]', config.WISPHUB_PASS)
-            page.click('button[type="submit"]')
-            page.wait_for_url("**/panel/**", timeout=20000)
+            page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
+            page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
+            page.click('button[type="submit"], input[type="submit"]')
+            page.wait_for_url("**/panel/**", timeout=25000)
 
             # 2. Upload
             page.goto(config.WISPHUB_IMPORT_URL)
@@ -207,26 +207,36 @@ def cycle_reverse_sync():
     setup_directories()
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=config.HEADLESS)
-        page = browser.new_page()
+        context = browser.new_context()
+        page = context.new_page()
         try:
-            # Login
+            # Login con selectores robustos
             page.goto(config.WISPHUB_LOGIN_URL)
-            page.fill('input[name="username"]', config.WISPHUB_USER)
-            page.fill('input[name="password"]', config.WISPHUB_PASS)
-            page.click('button[type="submit"]')
-            page.wait_for_url("**/panel/**", timeout=20000)
+            page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
+            page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
+            page.click('button[type="submit"], input[type="submit"]')
+            page.wait_for_url("**/panel/**", timeout=25000)
 
-            # Descarga
+            # Descarga de la base de datos
             db_file = download_database_wisphub(page)
             if db_file:
                 upload_database_sftp(db_file)
+            else:
+                logging.warning("No se pudo obtener el archivo de base de datos de WispHub.")
+                
+        except Exception as e:
+            logging.error(f"Error crítico en ciclo de sincronización: {e}")
+            send_email_report("WispHub: Fallo Sync 5min", f"El ciclo de sincronización de base de datos falló:\n\n{str(e)}")
         finally:
             browser.close()
 
 def main():
     if not config.ENABLE_LOOP:
-        cycle_payments("Ejecución única")
-        cycle_reverse_sync()
+        try:
+            cycle_payments("Ejecución única")
+            cycle_reverse_sync()
+        except Exception as e:
+            logging.error(f"Error en ejecución única: {e}")
         return
 
     # Tiempos de última ejecución (Unix timestamps)
@@ -241,18 +251,27 @@ def main():
 
         # 1. Sincronización Inversa (Cada 5 min)
         if now - last_sync >= (config.SYNC_INTERVAL_MINUTES * 60):
-            cycle_reverse_sync()
+            try:
+                cycle_reverse_sync()
+            except Exception as e:
+                logging.error(f"Fallo en Carrera de Sync: {e}")
             last_sync = time.time()
 
         # 2. Ciclo de Pagos (Primario - Cada 65 min)
         if now - last_payment_primary >= (config.LOOP_INTERVAL_MINUTES * 60):
-            cycle_payments("Carrera 1 de 2")
+            try:
+                cycle_payments("Carrera 1 de 2")
+            except Exception as e:
+                logging.error(f"Fallo en Carrera 1 de Pagos: {e}")
             last_payment_primary = time.time()
             secondary_due = True
 
         # 3. Ciclo de Pagos (Secundario - 2 min después del Primario)
         if secondary_due and (now - last_payment_primary >= (config.SECONDARY_INTERVAL_MINUTES * 60)):
-            cycle_payments("Carrera 2 de 2")
+            try:
+                cycle_payments("Carrera 2 de 2")
+            except Exception as e:
+                logging.error(f"Fallo en Carrera 2 de Pagos: {e}")
             secondary_due = False
 
         time.sleep(10) # Revisión cada 10 segundos
