@@ -42,6 +42,9 @@ HEADLESS = True # En VPS/Docker SIEMPRE debe ser True (no hay pantalla)
 # CONFIGURACIÓN DE AUTOMATIZACIÓN (LOOP)
 # ==========================================
 ENABLE_LOOP = True
+OPERATING_HOUR_START = int(os.getenv("OPERATING_HOUR_START", 5)) # 5 AM
+OPERATING_HOUR_END = int(os.getenv("OPERATING_HOUR_END", 20))     # 8 PM (Inclusive hasta las 19:59)
+
 LOOP_INTERVAL_MINUTES = int(os.getenv("LOOP_INTERVAL_MINUTES", 60))
 SECONDARY_INTERVAL_MINUTES = int(os.getenv("SECONDARY_INTERVAL_MINUTES", 5))
 SYNC_INTERVAL_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", 10))

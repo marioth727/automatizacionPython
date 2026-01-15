@@ -344,42 +344,57 @@ def main():
     secondary_due = False
 
     logging.info(f"Planificador iniciado. Sync: {config.SYNC_INTERVAL_MINUTES}m | Pagos: {config.LOOP_INTERVAL_MINUTES}m + {config.SECONDARY_INTERVAL_MINUTES}m")
+    logging.info(f"Horario Operativo: {config.OPERATING_HOUR_START}:00 - {config.OPERATING_HOUR_END}:00")
 
     while True:
-        now = time.time()
+        try:
+            now_dt = datetime.now()
+            
+            # Verificación de Horario Operativo
+            if not (config.OPERATING_HOUR_START <= now_dt.hour < config.OPERATING_HOUR_END):
+                logging.info(f"Fuera de horario operativo ({now_dt.hour}:00). Durmiendo 30 minutos...")
+                time.sleep(1800) # Dormir 30 min y volver a chequear
+                continue
 
-        # 1. Sincronización Inversa (Cada 10 min)
-        if now - last_sync >= (config.SYNC_INTERVAL_MINUTES * 60):
-            try:
-                cycle_reverse_sync()
-                time.sleep(config.TASK_DELAY_SECONDS) # Delay extendido para evitar Cloudflare
-            except Exception as e:
-                logging.error(f"Fallo en Carrera de Sync: {e}")
-            last_sync = time.time()
-            now = time.time() # Refrescar tiempo tras la espera
-
-        # 2. Ciclo de Pagos (Primario - Cada 65 min)
-        if now - last_payment_primary >= (config.LOOP_INTERVAL_MINUTES * 60):
-            try:
-                cycle_payments("Carrera 1 de 2")
-                time.sleep(config.TASK_DELAY_SECONDS) 
-            except Exception as e:
-                logging.error(f"Fallo en Carrera 1 de Pagos: {e}")
-            last_payment_primary = time.time()
-            secondary_due = True
             now = time.time()
 
-        # 3. Ciclo de Pagos (Secundario - 5 min después del Primario)
-        if secondary_due and (now - last_payment_primary >= (config.SECONDARY_INTERVAL_MINUTES * 60)):
-            try:
-                cycle_payments("Carrera 2 de 2")
-                time.sleep(config.TASK_DELAY_SECONDS)
-            except Exception as e:
-                logging.error(f"Fallo en Carrera 2 de Pagos: {e}")
-            secondary_due = False
-            now = time.time()
+            # 1. Sincronización Inversa (Cada 10 min)
+            if now - last_sync >= (config.SYNC_INTERVAL_MINUTES * 60):
+                try:
+                    cycle_reverse_sync()
+                    time.sleep(config.TASK_DELAY_SECONDS) # Delay extendido para evitar Cloudflare
+                except Exception as e:
+                    logging.error(f"Fallo en Carrera de Sync: {e}")
+                last_sync = time.time()
+                now = time.time() # Refrescar tiempo tras la espera
 
-        time.sleep(10) # Revisión cada 10 segundos
+            # 2. Ciclo de Pagos (Primario - Cada 60 min)
+            if now - last_payment_primary >= (config.LOOP_INTERVAL_MINUTES * 60):
+                try:
+                    cycle_payments("Carrera 1 de 2")
+                    time.sleep(config.TASK_DELAY_SECONDS) 
+                except Exception as e:
+                    logging.error(f"Fallo en Carrera 1 de Pagos: {e}")
+                last_payment_primary = time.time()
+                secondary_due = True
+                now = time.time()
+
+            # 3. Ciclo de Pagos (Secundario - 5 min después)
+            if secondary_due and (now - last_payment_primary >= (config.SECONDARY_INTERVAL_MINUTES * 60)):
+                try:
+                    cycle_payments("Carrera 2 de 2")
+                except Exception as e:
+                    logging.error(f"Fallo en Carrera 2 de Pagos: {e}")
+                secondary_due = False # Reset
+                
+            time.sleep(10) # Pequeño sleep para no saturar CPU en el loop
+
+        except KeyboardInterrupt:
+            logging.info("Detenido por usuario.")
+            break
+        except Exception as e:
+            logging.error(f"Error fatal en el loop principal: {e}")
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
