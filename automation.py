@@ -85,8 +85,8 @@ def upload_database_sftp(local_path):
         sftp.close()
         transport.close()
 
-def send_email_report(subject, body, attachment_path=None):
-    """Envía un correo electrónico con el reporte y un adjunto opcional."""
+def send_email_report(subject, body, attachment_paths=None):
+    """Envía un correo electrónico con el reporte y adjuntos opcionales (lista)."""
     if not config.ENABLE_EMAIL: return
     import smtplib
     from email.mime.text import MIMEText
@@ -99,13 +99,19 @@ def send_email_report(subject, body, attachment_path=None):
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        # Adjuntar archivo si existe
-        if attachment_path and os.path.exists(attachment_path):
-            with open(attachment_path, "rb") as f:
-                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
-            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
-            msg.attach(part)
-            logging.info(f"Archivo adjuntado al correo: {attachment_path}")
+        # Manejar múltiples adjuntos
+        if attachment_paths:
+            # Asegurar que sea una lista
+            if isinstance(attachment_paths, str):
+                attachment_paths = [attachment_paths]
+            
+            for path in attachment_paths:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        part = MIMEApplication(f.read(), Name=os.path.basename(path))
+                    part['Content-Disposition'] = f'attachment; filename="{os.path.basename(path)}"'
+                    msg.attach(part)
+                    logging.info(f"Archivo adjuntado al correo: {path}")
 
         with smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT) as server:
             server.starttls()
@@ -290,11 +296,11 @@ def cycle_payments(reason="Programado"):
             logging.info("No hay archivos nuevos en /Salida.")
 
 def cycle_reverse_sync():
-    """Tarea 2: WispHub DB -> SFTP /Entrada."""
+    """Tarea 2: WispHub DB -> SFTP /Entrada (Retorna ruta para reporte horario)."""
     logging.info("--- Iniciando Ciclo Sincronización (WispHub -> /Entrada) ---")
     setup_directories()
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=config.HEADLESS)
+        browser = p.chromium.launch(headless=config.headless) if hasattr(config, 'headless') else p.chromium.launch(headless=config.HEADLESS)
         context = browser.new_context()
         page = context.new_page()
         try:
@@ -316,16 +322,11 @@ def cycle_reverse_sync():
             if db_file:
                 upload_success = upload_database_sftp(db_file)
                 if upload_success:
-                    # Enviar correo de confirmación con el archivo adjunto
-                    subject = f"WispHub Sync: DB subida a SFTP - {datetime.now().strftime('%H:%M')}"
-                    body = f"Se ha sincronizado exitosamente la base de datos de WispHub con el servidor SFTP (/Entrada).\n\nArchivo: {os.path.basename(db_file)}\nFecha: {datetime.now()}"
-                    send_email_report(subject, body, attachment_path=db_file)
-            else:
-                logging.warning("No se pudo obtener el archivo de base de datos de WispHub.")
-                
+                    return db_file # Retornamos la ruta
+            return None
         except Exception as e:
             logging.error(f"Error crítico en ciclo de sincronización: {e}")
-            send_email_report("WispHub: Fallo Sync 10min", f"El ciclo de sincronización de base de datos falló:\n\n{str(e)}")
+            return "error"
         finally:
             browser.close()
 
@@ -341,9 +342,12 @@ def main():
     # Tiempos de última ejecución (Unix timestamps)
     last_sync = 0
     last_payment_primary = 0
+    last_sync_report = time.time() # Timer para el reporte consolidado
     secondary_due = False
+    pending_sync_files = [] # Lista para acumular archivos de sincronización
 
     logging.info(f"Planificador iniciado. Sync: {config.SYNC_INTERVAL_MINUTES}m | Pagos: {config.LOOP_INTERVAL_MINUTES}m + {config.SECONDARY_INTERVAL_MINUTES}m")
+    logging.info(f"Reporte Consolidado Sync: cada {config.SYNC_REPORT_INTERVAL_MINUTES}m")
     logging.info(f"Horario Operativo: {config.OPERATING_HOUR_START}:00 - {config.OPERATING_HOUR_END}:00")
 
     while True:
@@ -368,17 +372,33 @@ def main():
 
             now = time.time()
 
-            # 1. Sincronización Inversa (Cada 10 min)
+            # 1. Sincronización Inversa (Cada 10 min) - SOLO SUBIDA AL SFTP
             if now - last_sync >= (config.SYNC_INTERVAL_MINUTES * 60):
                 try:
-                    cycle_reverse_sync()
+                    res = cycle_reverse_sync()
+                    if res and res != "error":
+                        pending_sync_files.append(res)
                     time.sleep(config.TASK_DELAY_SECONDS) # Delay extendido para evitar Cloudflare
                 except Exception as e:
                     logging.error(f"Fallo en Carrera de Sync: {e}")
                 last_sync = time.time()
                 now = time.time() # Refrescar tiempo tras la espera
 
-            # 2. Ciclo de Pagos (Primario - Cada 60 min)
+            # 2. Reporte Consolidado de Sincronización (Cada 1 hora)
+            if now - last_sync_report >= (config.SYNC_REPORT_INTERVAL_MINUTES * 60):
+                if pending_sync_files:
+                    try:
+                        subject = f"Resumen Horario: Sincronización WispHub -> Efecty"
+                        body = f"Se han procesado {len(pending_sync_files)} archivos de sincronización en la última hora.\n\n"
+                        body += "Archivos subidos:\n" + "\n".join([f"- {os.path.basename(f)}" for f in pending_sync_files])
+                        send_email_report(subject, body, attachment_paths=pending_sync_files)
+                        pending_sync_files = [] # Limpiar para la siguiente hora
+                    except Exception as e:
+                        logging.error(f"Error enviando reporte consolidado: {e}")
+                last_sync_report = time.time()
+                now = time.time()
+
+            # 3. Ciclo de Pagos (Primario - Cada 60 min)
             if now - last_payment_primary >= (config.LOOP_INTERVAL_MINUTES * 60):
                 try:
                     cycle_payments("Carrera 1 de 2")
@@ -389,7 +409,7 @@ def main():
                 secondary_due = True
                 now = time.time()
 
-            # 3. Ciclo de Pagos (Secundario - 5 min después)
+            # 4. Ciclo de Pagos (Secundario - 5 min después)
             if secondary_due and (now - last_payment_primary >= (config.SECONDARY_INTERVAL_MINUTES * 60)):
                 try:
                     cycle_payments("Carrera 2 de 2")
