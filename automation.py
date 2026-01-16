@@ -350,8 +350,18 @@ def main():
         try:
             now_dt = datetime.now()
             
-            # Verificación de Horario Operativo
-            if not (config.OPERATING_HOUR_START <= now_dt.hour < config.OPERATING_HOUR_END):
+            # Verificación de Horario Operativo (Soporta cruce de medianoche)
+            in_window = False
+            if config.OPERATING_HOUR_START < config.OPERATING_HOUR_END:
+                # Caso estándar (ej: 8 AM a 8 PM)
+                if config.OPERATING_HOUR_START <= now_dt.hour < config.OPERATING_HOUR_END:
+                    in_window = True
+            else:
+                # Caso cruce de medianoche (ej: 6 AM a 1 AM)
+                if now_dt.hour >= config.OPERATING_HOUR_START or now_dt.hour < config.OPERATING_HOUR_END:
+                    in_window = True
+
+            if not in_window:
                 logging.info(f"Fuera de horario operativo ({now_dt.hour}:00). Durmiendo 30 minutos...")
                 time.sleep(1800) # Dormir 30 min y volver a chequear
                 continue
