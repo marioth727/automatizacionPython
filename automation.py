@@ -33,57 +33,78 @@ def setup_directories():
             logging.info(f"Directorio creado: {directory}")
 
 def connect_sftp():
-    """Conecta al servidor SFTP y retorna el cliente."""
-    try:
-        transport = paramiko.Transport((config.FTP_HOST, config.FTP_PORT))
-        transport.connect(username=config.FTP_USER, password=config.FTP_PASS)
-        sftp = paramiko.SFTPClient.from_transport(transport)
-        logging.info(f"Conectado a SFTP: {config.FTP_HOST}")
-        return sftp, transport
-    except Exception as e:
-        logging.error(f"Error conectando a SFTP: {e}")
-        return None, None
+    """Conecta al servidor SFTP y retorna el cliente con timeout."""
+    for attempt in range(config.FTP_MAX_RETRIES):
+        transport = None
+        try:
+            # Crear socket con timeout
+            import socket
+            sock = socket.create_connection((config.FTP_HOST, config.FTP_PORT), timeout=config.FTP_TIMEOUT)
+            
+            transport = paramiko.Transport(sock)
+            transport.connect(username=config.FTP_USER, password=config.FTP_PASS)
+            sftp = paramiko.SFTPClient.from_transport(transport)
+            logging.info(f"Conectado a SFTP: {config.FTP_HOST}")
+            return sftp, transport
+        except Exception as e:
+            logging.error(f"Error conectando a SFTP (intento {attempt + 1}/{config.FTP_MAX_RETRIES}): {e}")
+            if transport: transport.close()
+            if attempt < config.FTP_MAX_RETRIES - 1:
+                time.sleep(5) # Esperar antes de reintentar
+    return None, None
 
 def download_latest_file(sftp):
-    """Descarga el archivo más reciente del directorio SFTP (/Salida)."""
-    try:
-        sftp.chdir(config.FTP_DIR)
-        files = sftp.listdir_attr()
-        
-        files = [f for f in files if not f.filename.startswith(".")]
-        if not files:
-            logging.info("No se encontraron archivos en /Salida.")
-            return None
-        
-        latest_file = max(files, key=lambda f: f.st_mtime)
-        remote_path = latest_file.filename
-        local_path = os.path.join("downloads", latest_file.filename)
-        
-        logging.info(f"Descargando de /Salida: {remote_path}")
-        sftp.get(remote_path, local_path)
-        return local_path
-    except Exception as e:
-        logging.error(f"Error descargando archivo de /Salida: {e}")
-        return None
+    """Descarga el archivo más reciente del directorio SFTP (/Salida) con reintentos."""
+    for attempt in range(config.FTP_MAX_RETRIES):
+        try:
+            sftp.chdir(config.FTP_DIR)
+            files = sftp.listdir_attr()
+            
+            files = [f for f in files if not f.filename.startswith(".")]
+            if not files:
+                logging.info("No se encontraron archivos en /Salida.")
+                return None
+            
+            latest_file = max(files, key=lambda f: f.st_mtime)
+            remote_path = latest_file.filename
+            local_path = os.path.join("downloads", latest_file.filename)
+            
+            logging.info(f"Descargando de /Salida: {remote_path} (Intento {attempt + 1}/{config.FTP_MAX_RETRIES})")
+            sftp.get(remote_path, local_path)
+            return local_path
+        except Exception as e:
+            logging.error(f"Error en descarga SFTP (Intento {attempt + 1}/{config.FTP_MAX_RETRIES}): {e}")
+            if attempt < config.FTP_MAX_RETRIES - 1:
+                time.sleep(5)
+            else:
+                return None
 
 def upload_database_sftp(local_path):
-    """Sube el archivo de base de datos extraído de WispHub al SFTP (/Entrada)."""
-    sftp, transport = connect_sftp()
-    if not sftp:
-        return False
-    try:
-        sftp.chdir(config.FTP_DIR_ENTRY)
-        remote_filename = os.path.basename(local_path)
-        logging.info(f"Subiendo DB a SFTP: {remote_filename} en {config.FTP_DIR_ENTRY}")
-        sftp.put(local_path, remote_filename)
-        logging.info("Subida a SFTP (/Entrada) exitosa.")
-        return True
-    except Exception as e:
-        logging.error(f"Error subiendo DB a SFTP: {e}")
-        return False
-    finally:
-        sftp.close()
-        transport.close()
+    """Sube el archivo de base de datos extraído de WispHub al SFTP (/Entrada) con reintentos."""
+    for attempt in range(config.FTP_MAX_RETRIES):
+        sftp, transport = connect_sftp()
+        if not sftp:
+            if attempt < config.FTP_MAX_RETRIES - 1:
+                time.sleep(5)
+                continue
+            return False
+            
+        try:
+            sftp.chdir(config.FTP_DIR_ENTRY)
+            remote_filename = os.path.basename(local_path)
+            logging.info(f"Subiendo DB a SFTP: {remote_filename} en {config.FTP_DIR_ENTRY} (Intento {attempt + 1})")
+            sftp.put(local_path, remote_filename)
+            logging.info("Subida a SFTP (/Entrada) exitosa.")
+            return True
+        except Exception as e:
+            logging.error(f"Error subiendo DB a SFTP (Intento {attempt + 1}/{config.FTP_MAX_RETRIES}): {e}")
+            if attempt < config.FTP_MAX_RETRIES - 1:
+                time.sleep(5)
+            else:
+                return False
+        finally:
+            if sftp: sftp.close()
+            if transport: transport.close()
 
 def send_email_report(subject, body, attachment_paths=None):
     """Envía un correo electrónico con el reporte y adjuntos opcionales (lista)."""

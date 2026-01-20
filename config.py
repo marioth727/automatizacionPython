@@ -16,6 +16,8 @@ FTP_PASS = os.getenv("FTP_PASS", "E6R4D5D9")
 FTP_PORT = int(os.getenv("FTP_PORT", 22))
 FTP_DIR  = os.getenv("FTP_DIR", "/Salida")
 FTP_DIR_ENTRY = os.getenv("FTP_DIR_ENTRY", "/Entrada")
+FTP_TIMEOUT = int(os.getenv("FTP_TIMEOUT", 30))
+FTP_MAX_RETRIES = int(os.getenv("FTP_MAX_RETRIES", 3))
 
 # ==========================================
 # CREDENCIALES WISPHUB
