@@ -44,6 +44,8 @@ def connect_sftp():
             transport = paramiko.Transport(sock)
             transport.connect(username=config.FTP_USER, password=config.FTP_PASS)
             sftp = paramiko.SFTPClient.from_transport(transport)
+            # Asegurar que las operaciones de SFTP también tengan timeout
+            sftp.get_channel().settimeout(config.FTP_TIMEOUT) 
             logging.info(f"Conectado a SFTP: {config.FTP_HOST}")
             return sftp, transport
         except Exception as e:
@@ -57,7 +59,10 @@ def download_latest_file(sftp):
     """Descarga el archivo más reciente del directorio SFTP (/Salida) con reintentos."""
     for attempt in range(config.FTP_MAX_RETRIES):
         try:
+            logging.info(f"SFTP: Cambiando a directorio {config.FTP_DIR} (Intento {attempt + 1})")
             sftp.chdir(config.FTP_DIR)
+            
+            logging.info("SFTP: Listando archivos...")
             files = sftp.listdir_attr()
             
             files = [f for f in files if not f.filename.startswith(".")]
@@ -90,6 +95,7 @@ def upload_database_sftp(local_path):
             return False
             
         try:
+            logging.info(f"SFTP: Cambiando a directorio {config.FTP_DIR_ENTRY}...")
             sftp.chdir(config.FTP_DIR_ENTRY)
             remote_filename = os.path.basename(local_path)
             logging.info(f"Subiendo DB a SFTP: {remote_filename} en {config.FTP_DIR_ENTRY} (Intento {attempt + 1})")
@@ -219,7 +225,7 @@ def upload_file_playwright(file_path):
                 
                 # Esperamos que cargue la tabla o el texto indicativo
                 try:
-                    page.wait_for_selector("text='Por favor, indique a que clientes'", timeout=30000)
+                    page.wait_for_selector("text='Por favor, indique a que clientes'", timeout=60000)
                     logging.info("Texto de Paso 2 detectado.")
                 except:
                     logging.warning("No se detectó el texto esperado del Paso 2, procediendo a buscar el botón.")
@@ -261,9 +267,13 @@ def upload_file_playwright(file_path):
                     logging.info(f"Haciendo clic en '{btn_confirmar_text}'...")
                     btn_registrar.first.click()
                     
-                    # Esperar procesamiento
-                    page.wait_for_load_state('networkidle')
-                    time.sleep(10)
+                    # Esperar procesamiento (hasta 180s para archivos grandes con 300+ registros)
+                    logging.info(f"Esperando procesamiento de {count} registros...")
+                    try:
+                        page.wait_for_load_state('networkidle', timeout=180000)
+                    except:
+                        logging.warning("Timeout en networkidle, verificando por tiempo fijo...")
+                    time.sleep(15)  # Margen adicional para confirmar
                     logging.info("Procesamiento de activación completado.")
                 else:
                     # Si no hay botón, verifiquemos si hay un mensaje de WispHub (ej: ya procesado)
@@ -367,6 +377,9 @@ def main():
     secondary_due = False
     pending_sync_files = [] # Lista para acumular archivos de sincronización
 
+    logging.info("====================================================")
+    logging.info("SISTEMA DE AUTOMATIZACIÓN WISPHUB - v1.2 (Resiliencia SFTP)")
+    logging.info("====================================================")
     logging.info(f"Planificador iniciado. Sync: {config.SYNC_INTERVAL_MINUTES}m | Pagos: {config.LOOP_INTERVAL_MINUTES}m + {config.SECONDARY_INTERVAL_MINUTES}m")
     logging.info(f"Reporte Consolidado Sync: cada {config.SYNC_REPORT_INTERVAL_MINUTES}m")
     logging.info(f"Horario Operativo: {config.OPERATING_HOUR_START}:00 - {config.OPERATING_HOUR_END}:00")
