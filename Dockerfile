@@ -1,5 +1,5 @@
 # Usamos la versión EXACTA que pide el error para evitar fallos de ejecución
-FROM mcr.microsoft.com/playwright/python:v1.57.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
 
 
