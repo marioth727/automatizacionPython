@@ -1,6 +1,9 @@
 import os
+import gc
+import sys
 import logging
 import time
+import threading
 import paramiko
 from datetime import datetime
 import config
@@ -310,6 +313,7 @@ def upload_file_playwright(file_path):
             save_report(report)
         finally:
             browser.close()
+        gc.collect()
 
 def cycle_payments(reason="Programado"):
     """Tarea 1: Descarga SFTP /Salida -> WispHub."""
@@ -340,7 +344,7 @@ def cycle_reverse_sync():
             page.fill('input[name="username"], input[id*="user"], input[id*="login"]', config.WISPHUB_USER)
             page.fill('input[name="password"], input[id*="pass"]', config.WISPHUB_PASS)
             page.click('button[type="submit"], input[type="submit"]')
-            
+
             try:
                 page.wait_for_url("**/panel/**", timeout=45000)
             except:
@@ -359,7 +363,9 @@ def cycle_reverse_sync():
             logging.error(f"Error crítico en ciclo de sincronización: {e}")
             return "error"
         finally:
+            context.close()
             browser.close()
+        gc.collect()
 
 def main():
     if not config.ENABLE_LOOP:
@@ -376,9 +382,11 @@ def main():
     last_sync_report = time.time() # Timer para el reporte consolidado
     secondary_due = False
     pending_sync_files = [] # Lista para acumular archivos de sincronización
+    process_start_time = time.time()
+    MAX_UPTIME_HOURS = int(os.getenv("MAX_UPTIME_HOURS", 12))
 
     logging.info("====================================================")
-    logging.info("SISTEMA DE AUTOMATIZACIÓN WISPHUB - v1.2 (Resiliencia SFTP)")
+    logging.info("SISTEMA DE AUTOMATIZACIÓN WISPHUB - v1.3 (Resiliencia SFTP + Thread Fix)")
     logging.info("====================================================")
     logging.info(f"Planificador iniciado. Sync: {config.SYNC_INTERVAL_MINUTES}m | Pagos: {config.LOOP_INTERVAL_MINUTES}m + {config.SECONDARY_INTERVAL_MINUTES}m")
     logging.info(f"Reporte Consolidado Sync: cada {config.SYNC_REPORT_INTERVAL_MINUTES}m")
@@ -387,7 +395,18 @@ def main():
     while True:
         try:
             now_dt = datetime.now()
-            
+
+            # Auto-restart preventivo para liberar threads acumulados
+            uptime_hours = (time.time() - process_start_time) / 3600
+            if uptime_hours >= MAX_UPTIME_HOURS:
+                logging.info(f"Auto-restart preventivo tras {uptime_hours:.1f}h de uptime ({threading.active_count()} threads activos). Reiniciando...")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+
+            # Log periódico de threads (cada ~30 min, cuando se hace sync)
+            active_threads = threading.active_count()
+            if active_threads > 50:
+                logging.warning(f"Threads activos: {active_threads} — nivel alto, monitoreando.")
+
             # Verificación de Horario Operativo (Soporta cruce de medianoche)
             in_window = False
             if config.OPERATING_HOUR_START < config.OPERATING_HOUR_END:
