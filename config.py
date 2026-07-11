@@ -18,6 +18,7 @@ FTP_DIR  = os.getenv("FTP_DIR", "/Salida")
 FTP_DIR_ENTRY = os.getenv("FTP_DIR_ENTRY", "/Entrada")
 FTP_TIMEOUT = int(os.getenv("FTP_TIMEOUT", 30))
 FTP_MAX_RETRIES = int(os.getenv("FTP_MAX_RETRIES", 3))
+FTP_RETRY_DELAY_SECONDS = int(os.getenv("FTP_RETRY_DELAY_SECONDS", 5))  # Delay base entre reintentos (crece con backoff)
 
 # ==========================================
 # CREDENCIALES WISPHUB

@@ -36,26 +36,38 @@ def setup_directories():
             logging.info(f"Directorio creado: {directory}")
 
 def connect_sftp():
-    """Conecta al servidor SFTP y retorna el cliente con timeout."""
+    """Conecta al servidor SFTP y retorna el cliente con timeout.
+
+    Ante fallo de autenticación NO se reintenta: reintentar rápido con
+    credenciales incorrectas es lo que dispara el bloqueo de la cuenta
+    en el servidor. Ante errores de red/timeout sí se reintenta, con
+    backoff incremental (FTP_RETRY_DELAY_SECONDS * intento).
+    """
     for attempt in range(config.FTP_MAX_RETRIES):
         transport = None
         try:
             # Crear socket con timeout
             import socket
             sock = socket.create_connection((config.FTP_HOST, config.FTP_PORT), timeout=config.FTP_TIMEOUT)
-            
+
             transport = paramiko.Transport(sock)
             transport.connect(username=config.FTP_USER, password=config.FTP_PASS)
             sftp = paramiko.SFTPClient.from_transport(transport)
             # Asegurar que las operaciones de SFTP también tengan timeout
-            sftp.get_channel().settimeout(config.FTP_TIMEOUT) 
+            sftp.get_channel().settimeout(config.FTP_TIMEOUT)
             logging.info(f"Conectado a SFTP: {config.FTP_HOST}")
             return sftp, transport
+        except paramiko.AuthenticationException as e:
+            logging.error(f"Autenticación SFTP rechazada, no se reintenta para evitar bloqueo de cuenta: {e}")
+            if transport: transport.close()
+            return None, None
         except Exception as e:
             logging.error(f"Error conectando a SFTP (intento {attempt + 1}/{config.FTP_MAX_RETRIES}): {e}")
             if transport: transport.close()
             if attempt < config.FTP_MAX_RETRIES - 1:
-                time.sleep(5) # Esperar antes de reintentar
+                delay = config.FTP_RETRY_DELAY_SECONDS * (attempt + 1)  # Backoff incremental
+                logging.info(f"Esperando {delay}s antes de reintentar...")
+                time.sleep(delay)
     return None, None
 
 def download_latest_file(sftp):
@@ -88,32 +100,30 @@ def download_latest_file(sftp):
                 return None
 
 def upload_database_sftp(local_path):
-    """Sube el archivo de base de datos extraído de WispHub al SFTP (/Entrada) con reintentos."""
-    for attempt in range(config.FTP_MAX_RETRIES):
-        sftp, transport = connect_sftp()
-        if not sftp:
-            if attempt < config.FTP_MAX_RETRIES - 1:
-                time.sleep(5)
-                continue
-            return False
-            
-        try:
-            logging.info(f"SFTP: Cambiando a directorio {config.FTP_DIR_ENTRY}...")
-            sftp.chdir(config.FTP_DIR_ENTRY)
-            remote_filename = os.path.basename(local_path)
-            logging.info(f"Subiendo DB a SFTP: {remote_filename} en {config.FTP_DIR_ENTRY} (Intento {attempt + 1})")
-            sftp.put(local_path, remote_filename)
-            logging.info("Subida a SFTP (/Entrada) exitosa.")
-            return True
-        except Exception as e:
-            logging.error(f"Error subiendo DB a SFTP (Intento {attempt + 1}/{config.FTP_MAX_RETRIES}): {e}")
-            if attempt < config.FTP_MAX_RETRIES - 1:
-                time.sleep(5)
-            else:
-                return False
-        finally:
-            if sftp: sftp.close()
-            if transport: transport.close()
+    """Sube el archivo de base de datos extraído de WispHub al SFTP (/Entrada).
+
+    connect_sftp() ya maneja sus propios reintentos con backoff (y corta
+    de inmediato ante fallo de autenticación), así que aquí no se vuelve
+    a reintentar la conexión para no multiplicar los intentos fallidos.
+    """
+    sftp, transport = connect_sftp()
+    if not sftp:
+        return False
+
+    try:
+        logging.info(f"SFTP: Cambiando a directorio {config.FTP_DIR_ENTRY}...")
+        sftp.chdir(config.FTP_DIR_ENTRY)
+        remote_filename = os.path.basename(local_path)
+        logging.info(f"Subiendo DB a SFTP: {remote_filename} en {config.FTP_DIR_ENTRY}")
+        sftp.put(local_path, remote_filename)
+        logging.info("Subida a SFTP (/Entrada) exitosa.")
+        return True
+    except Exception as e:
+        logging.error(f"Error subiendo DB a SFTP: {e}")
+        return False
+    finally:
+        if sftp: sftp.close()
+        if transport: transport.close()
 
 def send_email_report(subject, body, attachment_paths=None):
     """Envía un correo electrónico con el reporte y adjuntos opcionales (lista)."""
